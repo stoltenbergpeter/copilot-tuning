@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>KB & Transcript SPA (Implicit Grant)</title>
+  <!-- Load Spark components and styling -->
+  <script type="module" src="https://app.usw2.pure.cloud/spark-components/build-assets/4.88.0-373/genesys-webcomponents/genesys-webcomponents.esm.js"></script>
+  <link href="https://app.usw2.pure.cloud/spark-components/build-assets/4.88.0-373/genesys-webcomponents/genesys-webcomponents.css" rel="stylesheet" />
+  <style>
+    section { padding: 16px; margin: auto; max-width: 600px; }
+    pre { background: #f4f4f4; padding: 16px; border-radius: 4px; max-height: 300px; overflow: auto; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <!-- OAuth and Spark initialization -->
+  <script>
+    // Implicit grant authentication before rendering
+    const CLIENT_ID    = 'ea9d228e-031f-4097-8330-33c795f5eeda';
+    const ORG_REGION   = 'usw2';
+    const REDIRECT_URI = window.location.origin + window.location.pathname;
+
+    function getTokenFromHash() {
+      const hash   = window.location.hash.substring(1);
+      const params = new URLSearchParams(hash);
+      return params.get('access_token');
+    }
+
+    function redirectToLogin() {
+      const authUrl = `https://login.${ORG_REGION}.pure.cloud/oauth/authorize` +
+                      `?response_type=token&client_id=${CLIENT_ID}` +
+                      `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
+      window.location.href = authUrl;
+    }
+
+    // Attempt to retrieve token, or redirect
+    const ACCESS_TOKEN = getTokenFromHash();
+    if (!ACCESS_TOKEN) redirectToLogin();
+    window.ACCESS_TOKEN = ACCESS_TOKEN;
+
+    // Now register Spark components
+    registerSparkComponents();
+  </script>
+
+  <!-- Header -->
+  <gux-page-header>
+    <h1 slot="heading">KnowledgeBase & Transcripts Manager</h1>
+  </gux-page-header>
+
+  <section>
+    <!-- Form fields -->
+    <gux-form-field-text-like>
+      <label slot="label">Agent IDs (JSON array)</label>
+      <input type="text" slot="input" id="inputAgentIds" placeholder='["id1","id2"]' />
+    </gux-form-field-text-like>
+    <gux-form-field-text-like>
+      <label slot="label">Interval (start/end ISO)</label>
+      <input type="text" slot="input" id="inputInterval" placeholder="2025-01-01T00:00:00/2025-01-02T00:00:00" />
+    </gux-form-field-text-like>
+    <gux-form-field-text-like>
+      <label slot="label">Queue IDs (JSON array)</label>
+      <input type="text" slot="input" id="inputQueueIds" placeholder='["queue1","queue2"]' />
+    </gux-form-field-text-like>
+
+    <!-- Action buttons -->
+    <div style="display: flex; gap: 8px; margin-top: 16px;">
+      <gux-button accent="primary" id="btnTranscripts">Run Transcripts & Download CSV</gux-button>
+      <gux-button accent="secondary" id="btnLogout">Logout</gux-button>
+    </div>
+
+    <!-- Log output -->
+    <pre id="log"></pre>
+  </section>
+
+  <script>
+    const logEl = document.getElementById('log');
+    function log(msg) { logEl.textContent += msg + '\n'; }
+
+    document.getElementById('btnLogout').addEventListener('click', () => {
+      window.location.hash = '';
+      window.location.reload();
+    });
+
+    async function mainTranscripts() {
+      const token     = window.ACCESS_TOKEN;
+      const agentIds  = JSON.parse(document.getElementById('inputAgentIds').value);
+      const queueIds  = JSON.parse(document.getElementById('inputQueueIds').value);
+      const interval  = document.getElementById('inputInterval').value;
+      const [start, end] = interval.split('/');
+
+      log('Fetching conversations...');
+      const convResp = await fetch(
+        `https://api.${ORG_REGION}.pure.cloud/api/v2/analytics/conversations/details/query`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            interval: `${start}/${end}`,
+            order: 'desc',
+            orderBy: 'conversationStart',
+            paging: { pageSize: 100 },
+            segmentFilters: [
+              { type: 'or', predicates: agentIds.map(id => ({ type: 'dimension', dimension: 'userId', value: id })) },
+              { type: 'or', predicates: queueIds.map(id => ({ type: 'dimension', dimension: 'queueId', value: id })) }
+            ]
+          })
+        }
+      );
+      const convJson      = await convResp.json();
+      const conversations = convJson.conversations || [];
+      log(`Conversations: ${conversations.length}`);
+
+      const mergedAll = [];
+      for (let conv of conversations) {
+        const cid = conv.conversationId;
+        const sugResp = await fetch(
+          `https://api.${ORG_REGION}.pure.cloud/api/v2/conversations/${cid}/suggestions`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        const suggestionsData = await sugResp.json();
+        const suggestions     = suggestionsData.entities || [];
+
+        const sugList = suggestions.map(e => ({
+          timestampMs: new Date(e.dateCreated).getTime(),
+          documentId:  e.knowledgeSearch?.document?.id || e.knowledgeArticle?.document?.id || '',
+          confidence:  e.knowledgeSearch?.confidence   || e.knowledgeArticle?.confidence   || '',
+          title:       e.knowledgeSearch?.title        || e.knowledgeArticle?.title        || ''
+        })).sort((a,b) => a.timestampMs - b.timestampMs);
+
+        const customer = conv.participants.find(p => p.purpose === 'customer');
+        const sessions = customer?.sessions || [];
+
+        for (let ses of sessions) {
+          // Only proceed if session is recorded
+          if (!ses.recording) {
+            log(`Skip session ${ses.sessionId}: recording not enabled`);
+            continue;
+          }
+          try {
+            const urlResp = await fetch(
+              `https://api.${ORG_REGION}.pure.cloud/api/v2/speechandtextanalytics/conversations/${cid}/communications/${ses.sessionId}/transcripturl`,
+              { headers: { 'Authorization': `Bearer ${token}` } }
+            );
+            const urlJson    = await urlResp.json();
+            const transcript = await (await fetch(urlJson.url)).json();
+
+            const phrases = [];
+            transcript.transcripts.forEach(t => t.phrases.forEach(p =>
+              phrases.push({ endMs: +p.startTimeMs + (p.duration?.milliseconds || 0), text: p.text })
+            ));
+            phrases.sort((a,b) => a.endMs - b.endMs);
+
+            for (let phr of phrases) {
+              for (let s of sugList) {
+                const diff = s.timestampMs - phr.endMs;
+                if (diff < 2000) continue;
+                if (diff > 6000) break;
+                mergedAll.push({
+                  phrase:             phr.text,
+                  documentId:         s.documentId,
+                  title:              s.title,
+                  confidence:         s.confidence,
+                  suggestionDelayMs:  diff,
+                  conversationId:     cid
+                });
+                break;
+              }
+            }
+          } catch (e) {
+            log(`Skip session ${ses.sessionId}: ${e}`);
+          }
+        }
+      }
+
+      log(`Rows: ${mergedAll.length}`);
+      downloadCSV(mergedAll, 'merged_timeline.csv');
+    }
+
+    function downloadCSV(rows, fname) {
+      if (!rows.length) { log('No rows to export'); return; }
+      const hdrs  = Object.keys(rows[0]);
+      const lines = rows.map(r => hdrs.map(h => `"${(r[h]||'').toString().replace(/"/g,'""')}"`).join(','));
+      const csv   = [hdrs.join(','), ...lines].join('\n');
+      const blob  = new Blob([csv], { type: 'text/csv' });
+      const url   = URL.createObjectURL(blob);
+      const a     = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
+    }
+
+    document.getElementById('btnTranscripts').addEventListener('click', () => {
+      logEl.textContent = '';
+      log('Running...');
+      mainTranscripts();
+    });
+  </script>
+</body>
+</html>
