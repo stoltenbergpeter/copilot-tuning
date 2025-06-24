@@ -13,41 +13,32 @@
   </style>
 </head>
 <body>
-  <!-- OAuth and Spark initialization -->
-  <script>
-    // Implicit grant authentication before rendering
-    const CLIENT_ID    = 'ea9d228e-031f-4097-8330-33c795f5eeda';
-    const ORG_REGION   = 'usw2';
-    const REDIRECT_URI = window.location.origin + window.location.pathname;
+  <!-- Auth section -->
+  <section id="authSection">
+    <gux-page-header>
+      <h1 slot="heading" align="center">Suggestions Manager: Authentication</h1>
+    </gux-page-header>
 
-    function getTokenFromHash() {
-      const hash   = window.location.hash.substring(1);
-      const params = new URLSearchParams(hash);
-      return params.get('access_token');
-    }
+    <gux-form-field-text-like>
+      <label slot="label">Client ID</label>
+      <input type="text" slot="input" id="inputClientId" placeholder="Enter your Client ID" />
+    </gux-form-field-text-like>
+    <br />
+  <gux-form-field-text-like>
+      <label slot="label">GC Region</label>
+      <input type="text" slot="input" id="inputRegion" placeholder="Enter your region eg 'usw2'" />
+    </gux-form-field-text-like>
+    <div style="margin-top:16px; text-align:center;">
+      <gux-button accent="primary" id="btnAuth">Authenticate</gux-button>
+    </div>
+  </section>
 
-    function redirectToLogin() {
-      const authUrl = `https://login.${ORG_REGION}.pure.cloud/oauth/authorize` +
-                      `?response_type=token&client_id=${CLIENT_ID}` +
-                      `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
-      window.location.href = authUrl;
-    }
+  <!-- Main app section (hidden until auth) -->
+  <section id="appSection" hidden>
+    <gux-page-header>
+      <h1 slot="heading" align="center">Suggestions Manager</h1>
+    </gux-page-header>
 
-    // Attempt to retrieve token, or redirect
-    const ACCESS_TOKEN = getTokenFromHash();
-    if (!ACCESS_TOKEN) redirectToLogin();
-    window.ACCESS_TOKEN = ACCESS_TOKEN;
-
-    // Now register Spark components
-    registerSparkComponents();
-  </script>
-
-  <!-- Header -->
-  <gux-page-header>
-    <h1 slot="heading" align="center">Genesys Cloud Suggestion Retriveval</h1>
-  </gux-page-header>
-
-  <section>
     <!-- Form fields -->
     <gux-form-field-text-like>
       <label slot="label">Agent IDs (JSON array)</label>
@@ -61,6 +52,10 @@
       <label slot="label">Queue IDs (JSON array)</label>
       <input type="text" slot="input" id="inputQueueIds" placeholder='["queue1","queue2"]' />
     </gux-form-field-text-like>
+    <gux-form-field-text-like>
+      <label slot="label">Batch Size</label>
+      <input type="number" slot="input" id="inputBatchSize" placeholder="10" />
+    </gux-form-field-text-like>
 
     <!-- Action buttons -->
     <div style="display: flex; gap: 8px; margin-top: 16px;">
@@ -73,32 +68,67 @@
   </section>
 
   <script>
+    // Utility to log messages
     const logEl = document.getElementById('log');
     function log(msg) { logEl.textContent += msg + '\n'; }
 
+    // On load, check for token in localStorage or URL hash
+    window.addEventListener('load', () => {
+      const hash = window.location.hash.substring(1);
+      const params = new URLSearchParams(hash);
+      const tokenFromHash = params.get('access_token');
+
+      if (tokenFromHash) {
+        // Save and clean up URL
+        localStorage.setItem('accessToken', tokenFromHash);
+        history.replaceState(null, '', window.location.pathname);
+      }
+
+      const token = localStorage.getItem('accessToken');
+      if (token) {
+        // Already authenticated
+        document.getElementById('authSection').hidden = true;
+        document.getElementById('appSection').hidden = false;
+        registerSparkComponents();
+      }
+    });
+
+    // Auth button handler
+    document.getElementById('btnAuth').addEventListener('click', () => {
+      const clientId = document.getElementById('inputClientId').value.trim();
+      const region   = document.getElementById('inputRegion').value.trim();
+      if (!clientId || !region) return alert('Please enter both Client ID and Region');
+
+      const redirectUri = window.location.origin + window.location.pathname;
+      const authUrl = `https://login.${region}.pure.cloud/oauth/authorize` +
+                      `?response_type=token&client_id=${clientId}` +
+                      `&redirect_uri=${encodeURIComponent(redirectUri)}`;
+      window.location.href = authUrl;
+    });
+
+    // Logout
     document.getElementById('btnLogout').addEventListener('click', () => {
-      window.location.hash = '';
+      localStorage.removeItem('accessToken');
       window.location.reload();
     });
 
+    // Main export logic, fully async with parallel fetches
     async function mainTranscripts() {
-      const token     = window.ACCESS_TOKEN;
+      const token     = localStorage.getItem('accessToken');
+      const region    = document.getElementById('inputRegion').value.trim();
       const agentIds  = JSON.parse(document.getElementById('inputAgentIds').value);
       const queueIds  = JSON.parse(document.getElementById('inputQueueIds').value);
       const interval  = document.getElementById('inputInterval').value;
+      const batchSize = parseInt(document.getElementById('inputBatchSize').value, 10) || Infinity;
       const [start, end] = interval.split('/');
 
       log('Fetching conversations...');
       const convResp = await fetch(
-        `https://api.${ORG_REGION}.pure.cloud/api/v2/analytics/conversations/details/query`,
-        {
+        `https://api.${region}.pure.cloud/api/v2/analytics/conversations/details/query`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            interval: `${start}/${end}`,
-            order: 'desc',
-            orderBy: 'conversationStart',
-            paging: { pageSize: 100 },
+            interval: `${start}/${end}`, order: 'desc', orderBy: 'conversationStart', paging: { pageSize: 100 },
             segmentFilters: [
               { type: 'or', predicates: agentIds.map(id => ({ type: 'dimension', dimension: 'userId', value: id })) },
               { type: 'or', predicates: queueIds.map(id => ({ type: 'dimension', dimension: 'queueId', value: id })) }
@@ -106,90 +136,96 @@
           })
         }
       );
-      const convJson      = await convResp.json();
-      const conversations = convJson.conversations || [];
-      log(`Conversations: ${conversations.length}`);
+      const { conversations = [] } = await convResp.json();
+      log(`Conversations fetched: ${conversations.length}`);
 
-      const mergedAll = [];
-      for (let conv of conversations) {
-        const cid = conv.conversationId;
-        const sugResp = await fetch(
-          `https://api.${ORG_REGION}.pure.cloud/api/v2/conversations/${cid}/suggestions`,
-          { headers: { 'Authorization': `Bearer ${token}` } }
-        );
-        const suggestionsData = await sugResp.json();
-        const suggestions     = suggestionsData.entities || [];
+      let batchNumber = 0;
+      for (let i = 0; i < conversations.length; i += batchSize) {
+        batchNumber++;
+        const batch = conversations.slice(i, i + batchSize);
+        log(`Processing batch ${batchNumber} (${batch.length} convs)...`);
 
-        const sugList = suggestions.map(e => ({
-          timestampMs: new Date(e.dateCreated).getTime(),
-          documentId:  e.knowledgeSearch?.document?.id || e.knowledgeArticle?.document?.id || '',
-          confidence:  e.knowledgeSearch?.confidence   || e.knowledgeArticle?.confidence   || '',
-          title:       e.knowledgeSearch?.title        || e.knowledgeArticle?.title        || ''
-        })).sort((a,b) => a.timestampMs - b.timestampMs);
+        // Fetch suggestions for all convs in parallel
+        const sugData = await Promise.all(batch.map(conv =>
+          fetch(`https://api.${region}.pure.cloud/api/v2/conversations/${conv.conversationId}/suggestions`,
+            { headers: { 'Authorization': `Bearer ${token}` } })
+            .then(r => r.json())
+            .then(j => ({ id: conv.conversationId, entities: j.entities || [] }))
+        ));
 
-        const customer = conv.participants.find(p => p.purpose === 'customer');
-        const sessions = customer?.sessions || [];
+        const mergedBatch = [];
+        // Process each conv in parallel
+        await Promise.all(batch.map(async conv => {
+          const { conversationId: cid } = conv;
+          const entities = sugData.find(s => s.id === cid).entities;
+          const sugList = entities.map(e => ({
+            timestampMs: new Date(e.dateCreated).getTime(),
+            documentId:  e.knowledgeSearch?.document?.id || e.knowledgeArticle?.document?.id || '',
+            confidence:  e.knowledgeSearch?.confidence   || e.knowledgeArticle?.confidence   || '',
+            title:       e.knowledgeSearch?.title        || e.knowledgeArticle?.title        || ''
+          })).sort((a,b) => a.timestampMs - b.timestampMs);
 
-        for (let ses of sessions) {
-          // Only proceed if session is recorded
-          if (!ses.recording) {
-            log(`Skip session ${ses.sessionId}: recording not enabled`);
-            continue;
-          }
-          try {
-            const urlResp = await fetch(
-              `https://api.${ORG_REGION}.pure.cloud/api/v2/speechandtextanalytics/conversations/${cid}/communications/${ses.sessionId}/transcripturl`,
-              { headers: { 'Authorization': `Bearer ${token}` } }
-            );
-            const urlJson    = await urlResp.json();
-            const transcript = await (await fetch(urlJson.url)).json();
+          const customer = conv.participants.find(p => p.purpose === 'customer');
+          const sessions = customer?.sessions || [];
 
-            const phrases = [];
-            transcript.transcripts.forEach(t => t.phrases.forEach(p =>
-              phrases.push({ endMs: +p.startTimeMs + (p.duration?.milliseconds || 0), text: p.text })
-            ));
-            phrases.sort((a,b) => a.endMs - b.endMs);
+          // Process sessions in parallel
+          const sessionResults = await Promise.all(sessions.map(async ses => {
+            if (!ses.recording) return [];
+            try {
+              const urlReq = await fetch(
+                `https://api.${region}.pure.cloud/api/v2/speechandtextanalytics/conversations/${cid}/communications/${ses.sessionId}/transcripturl`,
+                { headers: { 'Authorization': `Bearer ${token}` } }
+              );
+              const { url } = await urlReq.json();
+              const transcript = await (await fetch(url)).json();
 
-            for (let phr of phrases) {
-              for (let s of sugList) {
-                const diff = s.timestampMs - phr.endMs;
-                if (diff < 2000) continue;
-                if (diff > 6000) break;
-                mergedAll.push({
-                  phrase:             phr.text,
-                  documentId:         s.documentId,
-                  title:              s.title,
-                  confidence:         s.confidence,
-                  suggestionDelayMs:  diff,
-                  conversationId:     cid
-                });
-                break;
+              const phrases = [];
+              transcript.transcripts.forEach(t => t.phrases.forEach(p =>
+                phrases.push({ endMs: +p.startTimeMs + (p.duration?.milliseconds || 0), text: p.text })
+              ));
+              phrases.sort((a,b) => a.endMs - b.endMs);
+
+              const merged = [];
+              for (let phr of phrases) {
+                for (let s of sugList) {
+                  const diff = s.timestampMs - phr.endMs;
+                  if (diff < 2000) continue;
+                  if (diff > 6000) break;
+                  merged.push({ phrase: phr.text, documentId: s.documentId, title: s.title,
+                    confidence: s.confidence, suggestionDelayMs: diff, conversationId: cid });
+                  break;
+                }
               }
+              return merged;
+            } catch (e) {
+              log(`Skip session ${ses.sessionId}: ${e}`);
+              return [];
             }
-          } catch (e) {
-            log(`Skip session ${ses.sessionId}: ${e}`);
-          }
-        }
-      }
+          }));
 
-      log(`Rows: ${mergedAll.length}`);
-      downloadCSV(mergedAll, 'merged_timeline.csv');
+          sessionResults.flat().forEach(item => mergedBatch.push(item));
+        }));
+
+        log(`Batch ${batchNumber} done, rows: ${mergedBatch.length}`);
+        downloadCSV(mergedBatch, `merged_timeline_batch_${batchNumber}.csv`);
+      }
     }
 
     function downloadCSV(rows, fname) {
-      if (!rows.length) { log('No rows to export'); return; }
+      if (!rows.length) { log('No rows to export for this batch'); return; }
       const hdrs  = Object.keys(rows[0]);
       const lines = rows.map(r => hdrs.map(h => `"${(r[h]||'').toString().replace(/"/g,'""')}"`).join(','));
       const csv   = [hdrs.join(','), ...lines].join('\n');
       const blob  = new Blob([csv], { type: 'text/csv' });
       const url   = URL.createObjectURL(blob);
-      const a     = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
+      const a     = document.createElement('a'); a.href = url; a.download = fname;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     }
 
-    document.getElementById('btnTranscripts').addEventListener('click', () => {
+    document.getElementById('btnTranscripts').addEventListener('click', async () => {
       logEl.textContent = '';
-      log('Running...');
-      mainTranscripts();
+      log('Running export in batches...');
+      await mainTranscripts();
     });
   </script>
 </body>
