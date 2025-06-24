@@ -14,19 +14,17 @@
 </head>
 <body>
   <!-- Auth section -->
-  <section id="authSection">
+  <section id="authSection" hidden>
     <gux-page-header>
-      <h1 slot="heading" align="center">Suggestions Manager: Authentication</h1>
+      <h1 slot="heading" align="center">Authenticate</h1>
     </gux-page-header>
-
     <gux-form-field-text-like>
       <label slot="label">Client ID</label>
       <input type="text" slot="input" id="inputClientId" placeholder="Enter your Client ID" />
     </gux-form-field-text-like>
-    <br />
-  <gux-form-field-text-like>
-      <label slot="label">GC Region</label>
-      <input type="text" slot="input" id="inputRegion" placeholder="Enter your region eg 'usw2'" />
+    <gux-form-field-text-like>
+      <label slot="label">Region</label>
+      <input type="text" slot="input" id="inputRegion" placeholder="e.g. usw2" />
     </gux-form-field-text-like>
     <div style="margin-top:16px; text-align:center;">
       <gux-button accent="primary" id="btnAuth">Authenticate</gux-button>
@@ -68,57 +66,113 @@
   </section>
 
   <script>
-    // Utility to log messages
+    // helper to log both console and on-page
     const logEl = document.getElementById('log');
-    function log(msg) { logEl.textContent += msg + '\n'; }
+    function log(msg) {
+      console.log(msg);
+      logEl.textContent += msg + '\n';
+    }
 
-    // On load, check for token in localStorage or URL hash
     window.addEventListener('load', () => {
+      // 1) parse URL params & sync to sessionStorage
+      const url = new URL(window.location.href);
+      let gc_region          = url.searchParams.get('gc_region');
+      let gc_clientId        = url.searchParams.get('gc_clientId');
+      let gc_redirectUrl     = url.searchParams.get('gc_redirectUrl');
+      let gc_conversationId  = url.searchParams.get('gc_conversationId');
+
+      if (gc_region) {
+        sessionStorage.setItem('gc_region', gc_region);
+      } else {
+        gc_region = sessionStorage.getItem('gc_region');
+      }
+      if (gc_clientId) {
+        sessionStorage.setItem('gc_clientId', gc_clientId);
+      } else {
+        gc_clientId = sessionStorage.getItem('gc_clientId');
+      }
+      if (gc_redirectUrl) {
+        sessionStorage.setItem('gc_redirectUrl', gc_redirectUrl);
+      } else {
+        gc_redirectUrl = sessionStorage.getItem('gc_redirectUrl');
+      }
+      if (gc_conversationId) {
+        sessionStorage.setItem('gc_conversationId', gc_conversationId);
+      } else {
+        gc_conversationId = sessionStorage.getItem('gc_conversationId');
+      }
+
+      //log(`Params → region:${gc_region}, clientId:${gc_clientId}, redirectUrl:${gc_redirectUrl}`);
+
+      // 2) check for token in hash & localStorage
       const hash = window.location.hash.substring(1);
       const params = new URLSearchParams(hash);
       const tokenFromHash = params.get('access_token');
-
       if (tokenFromHash) {
-        // Save and clean up URL
+        //log('Received token in URL hash, saving to localStorage');
         localStorage.setItem('accessToken', tokenFromHash);
         history.replaceState(null, '', window.location.pathname);
       }
-
       const token = localStorage.getItem('accessToken');
+
+      // 3) decide whether to auto‐redirect, show auth form, or show app
       if (token) {
-        // Already authenticated
+        //log('Token found – showing app');
         document.getElementById('authSection').hidden = true;
         document.getElementById('appSection').hidden = false;
         registerSparkComponents();
       }
+      else if (gc_region && gc_clientId && gc_redirectUrl) {
+        log('No token yet, auto‐redirecting to OAuth');
+        const authUrl = `https://login.${gc_region}.pure.cloud/oauth/authorize` +
+                        `?response_type=token&client_id=${gc_clientId}` +
+                        `&redirect_uri=${encodeURIComponent(gc_redirectUrl)}`;
+        window.location.href = authUrl;
+      }
+      else {
+        //log('Missing OAuth params – showing auth form');
+        document.getElementById('authSection').hidden = false;
+        document.getElementById('appSection').hidden = true;
+      }
     });
 
-    // Auth button handler
+    // manual auth button
     document.getElementById('btnAuth').addEventListener('click', () => {
       const clientId = document.getElementById('inputClientId').value.trim();
       const region   = document.getElementById('inputRegion').value.trim();
-      if (!clientId || !region) return alert('Please enter both Client ID and Region');
-
+      if (!clientId || !region) return alert('Both Client ID and Region are required.');
       const redirectUri = window.location.origin + window.location.pathname;
+      sessionStorage.setItem('gc_clientId', clientId);
+      sessionStorage.setItem('gc_region', region);
+      sessionStorage.setItem('gc_redirectUrl', redirectUri);
+      //log(`Redirecting to OAuth: region=${region}, clientId=${clientId}`);
       const authUrl = `https://login.${region}.pure.cloud/oauth/authorize` +
                       `?response_type=token&client_id=${clientId}` +
                       `&redirect_uri=${encodeURIComponent(redirectUri)}`;
       window.location.href = authUrl;
     });
 
-    // Logout
-    document.getElementById('btnLogout').addEventListener('click', () => {
-      localStorage.removeItem('accessToken');
-      window.location.reload();
-    });
+    // logout
+   document.getElementById('btnLogout').addEventListener('click', () => {
+    log('Logging out…');
+    // Remove OAuth token
+    localStorage.removeItem('accessToken');
+    // Remove any stored Genesys Cloud params
+    sessionStorage.removeItem('gc_region');
+    sessionStorage.removeItem('gc_clientId');
+    sessionStorage.removeItem('gc_redirectUrl');
+    sessionStorage.removeItem('gc_conversationId');
+    // Refresh to return to auth form
+    window.location.reload();
+  });
 
-    // Main export logic, fully async with parallel fetches
+    // main export logic
     async function mainTranscripts() {
-      const token     = localStorage.getItem('accessToken');
-      const region    = document.getElementById('inputRegion').value.trim();
-      const agentIds  = JSON.parse(document.getElementById('inputAgentIds').value);
-      const queueIds  = JSON.parse(document.getElementById('inputQueueIds').value);
-      const interval  = document.getElementById('inputInterval').value;
+      const token    = localStorage.getItem('accessToken');
+      const region   = sessionStorage.getItem('gc_region');
+      const agentIds = JSON.parse(document.getElementById('inputAgentIds').value);
+      const queueIds = JSON.parse(document.getElementById('inputQueueIds').value);
+      const interval = document.getElementById('inputInterval').value;
       const batchSize = parseInt(document.getElementById('inputBatchSize').value, 10) || Infinity;
       const [start, end] = interval.split('/');
 
@@ -128,10 +182,13 @@
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            interval: `${start}/${end}`, order: 'desc', orderBy: 'conversationStart', paging: { pageSize: 100 },
+            interval: `${start}/${end}`,
+            order: 'desc',
+            orderBy: 'conversationStart',
+            paging: { pageSize: 100 },
             segmentFilters: [
-              { type: 'or', predicates: agentIds.map(id => ({ type: 'dimension', dimension: 'userId', value: id })) },
-              { type: 'or', predicates: queueIds.map(id => ({ type: 'dimension', dimension: 'queueId', value: id })) }
+              { type:'or', predicates: agentIds.map(id=>({type:'dimension',dimension:'userId',value:id})) },
+              { type:'or', predicates: queueIds.map(id=>({type:'dimension',dimension:'queueId',value:id})) }
             ]
           })
         }
@@ -145,65 +202,69 @@
         const batch = conversations.slice(i, i + batchSize);
         log(`Processing batch ${batchNumber} (${batch.length} convs)...`);
 
-        // Fetch suggestions for all convs in parallel
+        // fetch suggestions in parallel
         const sugData = await Promise.all(batch.map(conv =>
-          fetch(`https://api.${region}.pure.cloud/api/v2/conversations/${conv.conversationId}/suggestions`,
-            { headers: { 'Authorization': `Bearer ${token}` } })
+          fetch(`https://api.${region}.pure.cloud/api/v2/conversations/${conv.conversationId}/suggestions`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
             .then(r => r.json())
             .then(j => ({ id: conv.conversationId, entities: j.entities || [] }))
         ));
 
         const mergedBatch = [];
-        // Process each conv in parallel
         await Promise.all(batch.map(async conv => {
-          const { conversationId: cid } = conv;
-          const entities = sugData.find(s => s.id === cid).entities;
-          const sugList = entities.map(e => ({
-            timestampMs: new Date(e.dateCreated).getTime(),
-            documentId:  e.knowledgeSearch?.document?.id || e.knowledgeArticle?.document?.id || '',
-            confidence:  e.knowledgeSearch?.confidence   || e.knowledgeArticle?.confidence   || '',
-            title:       e.knowledgeSearch?.title        || e.knowledgeArticle?.title        || ''
-          })).sort((a,b) => a.timestampMs - b.timestampMs);
+          const sugEntry = sugData.find(s=>s.id===conv.conversationId);
+          const sugList = sugEntry.entities
+            .map(e=>({
+              timestampMs: new Date(e.dateCreated).getTime(),
+              documentId: e.knowledgeSearch?.document?.id || e.knowledgeArticle?.document?.id||'',
+              confidence: e.knowledgeSearch?.confidence||e.knowledgeArticle?.confidence||'',
+              title: e.knowledgeSearch?.title||e.knowledgeArticle?.title||''
+            }))
+            .sort((a,b)=>a.timestampMs-b.timestampMs);
 
-          const customer = conv.participants.find(p => p.purpose === 'customer');
-          const sessions = customer?.sessions || [];
+          const customer = conv.participants.find(p=>p.purpose==='customer');
+          const sessions = customer?.sessions||[];
 
-          // Process sessions in parallel
-          const sessionResults = await Promise.all(sessions.map(async ses => {
-            if (!ses.recording) return [];
+          await Promise.all(sessions.map(async ses => {
+            if (!ses.recording) {
+              log(`Skip session ${ses.sessionId}: recording disabled`);
+              return;
+            }
             try {
               const urlReq = await fetch(
-                `https://api.${region}.pure.cloud/api/v2/speechandtextanalytics/conversations/${cid}/communications/${ses.sessionId}/transcripturl`,
-                { headers: { 'Authorization': `Bearer ${token}` } }
+                `https://api.${region}.pure.cloud/api/v2/speechandtextanalytics/conversations/${conv.conversationId}/communications/${ses.sessionId}/transcripturl`,
+                { headers:{ 'Authorization':`Bearer ${token}` } }
               );
               const { url } = await urlReq.json();
               const transcript = await (await fetch(url)).json();
 
               const phrases = [];
               transcript.transcripts.forEach(t => t.phrases.forEach(p =>
-                phrases.push({ endMs: +p.startTimeMs + (p.duration?.milliseconds || 0), text: p.text })
+                phrases.push({ endMs: +p.startTimeMs + (p.duration?.milliseconds||0), text: p.text })
               ));
-              phrases.sort((a,b) => a.endMs - b.endMs);
+              phrases.sort((a,b)=>a.endMs-b.endMs);
 
-              const merged = [];
               for (let phr of phrases) {
                 for (let s of sugList) {
                   const diff = s.timestampMs - phr.endMs;
                   if (diff < 2000) continue;
                   if (diff > 6000) break;
-                  merged.push({ phrase: phr.text, documentId: s.documentId, title: s.title,
-                    confidence: s.confidence, suggestionDelayMs: diff, conversationId: cid });
+                  mergedBatch.push({
+                    phrase: phr.text,
+                    documentId: s.documentId,
+                    title: s.title,
+                    confidence: s.confidence,
+                    suggestionDelayMs: diff,
+                    conversationId: conv.conversationId
+                  });
                   break;
                 }
               }
-              return merged;
             } catch (e) {
               log(`Skip session ${ses.sessionId}: ${e}`);
-              return [];
             }
           }));
-
-          sessionResults.flat().forEach(item => mergedBatch.push(item));
         }));
 
         log(`Batch ${batchNumber} done, rows: ${mergedBatch.length}`);
@@ -213,18 +274,18 @@
 
     function downloadCSV(rows, fname) {
       if (!rows.length) { log('No rows to export for this batch'); return; }
-      const hdrs  = Object.keys(rows[0]);
+      const hdrs = Object.keys(rows[0]);
       const lines = rows.map(r => hdrs.map(h => `"${(r[h]||'').toString().replace(/"/g,'""')}"`).join(','));
-      const csv   = [hdrs.join(','), ...lines].join('\n');
-      const blob  = new Blob([csv], { type: 'text/csv' });
-      const url   = URL.createObjectURL(blob);
-      const a     = document.createElement('a'); a.href = url; a.download = fname;
+      const csv = [hdrs.join(','), ...lines].join('\n');
+      const blob = new Blob([csv],{type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = fname;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     }
 
     document.getElementById('btnTranscripts').addEventListener('click', async () => {
       logEl.textContent = '';
-      log('Running export in batches...');
+      log('Starting export in batches…');
       await mainTranscripts();
     });
   </script>
