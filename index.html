@@ -8,9 +8,11 @@
   <script type="module" src="https://app.usw2.pure.cloud/spark-components/build-assets/4.88.0-373/genesys-webcomponents/genesys-webcomponents.esm.js"></script>
   <link href="https://app.usw2.pure.cloud/spark-components/build-assets/4.88.0-373/genesys-webcomponents/genesys-webcomponents.css" rel="stylesheet" />
   <style>
-    section { padding: 16px; margin: auto; max-width: 600px; }
+    section { padding: 8px; margin: auto; max-width: 800px; }
     pre { background: #f4f4f4; padding: 16px; border-radius: 4px; max-height: 300px; overflow: auto; white-space: pre-wrap; }
   </style>
+
+
 </head>
 <body>
   <!-- Auth section -->
@@ -23,12 +25,13 @@
       <input type="text" slot="input" id="inputClientId" placeholder="Enter your Client ID" />
     </gux-form-field-text-like>
     <gux-form-field-text-like>
-      <label slot="label">Region</label>
+      <label slot="label">Genesys Cloud Region</label>
       <input type="text" slot="input" id="inputRegion" placeholder="e.g. usw2" />
     </gux-form-field-text-like>
     <div style="margin-top:16px; text-align:center;">
       <gux-button accent="primary" id="btnAuth">Authenticate</gux-button>
     </div>
+ 
   </section>
 
   <!-- Main app section (hidden until auth) -->
@@ -37,21 +40,34 @@
       <h1 slot="heading" align="center">Suggestions Manager</h1>
     </gux-page-header>
 
+  <!-- NEW: Users multi-select -->
+   <h3 > User Selection</h3>
+    <div style="margin: 4px 0;">
+      <div id="userHeader" class="empty"></div>
+      <gux-dropdown-multi placeholder="Select one or more users" id="multi-users" filter-type="starts-with">
+        <gux-listbox-multi aria-label="Users" id="Users-Id">
+        </gux-listbox-multi>
+      </gux-dropdown-multi>
+    </div>
+   
+ <h3 > Queue Selection</h3>
+
+      <gux-dropdown-multi placeholder="Select one or more Queues" id="queue-users" filter-type="starts-with">
+        <gux-listbox-multi aria-label="Queues" id="Queues-Id">
+        </gux-listbox-multi>
+      </gux-dropdown-multi>
     <!-- Form fields -->
-    <gux-form-field-text-like>
-      <label slot="label">Agent IDs (JSON array)</label>
-      <input type="text" slot="input" id="inputAgentIds" placeholder='["id1","id2"]' />
-    </gux-form-field-text-like>
-    <gux-form-field-text-like>
-      <label slot="label">Interval (start/end ISO)</label>
+       <h3 style="margin: 1px;"> Interval Selection</h3>
+    <gux-form-field-text-like style="margin: 1px;">
       <input type="text" slot="input" id="inputInterval" placeholder="2025-01-01T00:00:00/2025-01-02T00:00:00" />
+    
     </gux-form-field-text-like>
-    <gux-form-field-text-like>
-      <label slot="label">Queue IDs (JSON array)</label>
-      <input type="text" slot="input" id="inputQueueIds" placeholder='["queue1","queue2"]' />
-    </gux-form-field-text-like>
-    <gux-form-field-text-like>
-      <label slot="label">Batch Size</label>
+
+     
+
+          <h3 style="margin: 1px;"> Batch Size Selection</h3>
+
+    <gux-form-field-text-like style="margin: 1px;">
       <input type="number" slot="input" id="inputBatchSize" placeholder="10" />
     </gux-form-field-text-like>
 
@@ -60,6 +76,7 @@
       <gux-button accent="primary" id="btnTranscripts">Run Transcripts & Download CSV</gux-button>
       <gux-button accent="secondary" id="btnLogout">Logout</gux-button>
     </div>
+       
 
     <!-- Log output -->
     <pre id="log"></pre>
@@ -73,6 +90,8 @@
       logEl.textContent += msg + '\n';
     }
 
+
+    
     window.addEventListener('load', () => {
       // 1) parse URL params & sync to sessionStorage
       const url = new URL(window.location.href);
@@ -128,7 +147,67 @@
     //log('Token found – showing app');
     document.getElementById('authSection').hidden = true;
     document.getElementById('appSection').hidden = false;
-    registerSparkComponents();
+   
+    // after login, populate the dropdown
+    async function populateUsers() {
+      const token  = localStorage.getItem('accessToken');
+      const region = sessionStorage.getItem('gc_region');
+      try {
+        // show a temporary placeholder
+        userListbox=document.getElementById("Users-Id");
+    
+    //    userListbox.innerHTML = '<gux-option-multi disabled>Loading users…</gux-option-multi>';
+        const users = await loadAllUsers(region, token);
+        //userListbox.innerHTML = '';  // clear
+        users.forEach(u => {
+          const opt = document.createElement('gux-option-multi');
+          opt.setAttribute('value',u.id);
+          opt.innerText = u.name;
+          userListbox.appendChild(opt);
+
+        });
+                console.log('Appended', users.length, 'options to listbox:', userListbox);
+
+      }
+      catch (e) {
+        console.error(e);
+        userListbox.innerHTML = '<gux-option-multi disabled>Error loading users</gux-option-multi>';
+      }
+      userDropdown.requestContentUpdate?.();
+
+
+      //updateUserHeader();
+    }
+    populateUsers();
+  
+   async function populateQueues() {
+      const token  = localStorage.getItem('accessToken');
+      const region = sessionStorage.getItem('gc_region');
+      try {
+        // show a temporary placeholder
+        queueListbox=document.getElementById("Queues-Id");
+    
+        const queues = await loadAllqueues(region, token);
+        queues.forEach(u => {
+          const opt = document.createElement('gux-option-multi');
+          opt.setAttribute('value',u.id);
+          opt.innerText = u.name;
+          queueListbox.appendChild(opt);
+
+        });
+                console.log('Appended', queues.length, 'options to listbox:', queueListbox);
+
+      }
+      catch (e) {
+        console.error(e);
+        queueListbox.innerHTML = '<gux-option-multi disabled>Error loading queues</gux-option-multi>';
+      }
+      queueDropdown.requestContentUpdate?.();
+
+
+      //updateUserHeader();
+    }
+    populateQueues();
   }
   else {
     //log('No token yet, auto‐redirecting to OAuth');
@@ -138,7 +217,110 @@
     window.location.href = authUrl;
   }
     });
+       const userDropdown = document.querySelector('gux-dropdown-multi');
+       let userListbox  = userDropdown.querySelector('gux-listbox-multi');
+        const queueDropdown = document.querySelector('gux-dropdown-multi');
+       let queueListbox  = userDropdown.querySelector('gux-listbox-multi');
+       const userHeader   = document.getElementById('userHeader');
+              const queueHeader   = document.getElementById('queueHeader');
 
+
+ function updateUserHeader() {
+      const selected = Array.from(userListbox.querySelectorAll('gux-option-multi[selected]'));
+      console.log('Listbox element is:', userListbox);
+    console.log('Children count:', userListbox.children.length);
+    console.log(userListbox.innerHTML);
+
+      userHeader.textContent = '';
+      userHeader.classList.toggle('empty', selected.length === 0);
+      selected.forEach(opt => {
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.textContent = opt.textContent.trim();
+        userHeader.appendChild(chip);
+      });
+    }
+    
+    userDropdown.addEventListener('guxchanged', updateUserHeader);
+    userDropdown.addEventListener('guxcollapsed', updateUserHeader);
+ 
+    function updateQueueHeader() {
+      const selected = Array.from(queueListbox.querySelectorAll('gux-option-multi[selected]'));
+      console.log('Listbox element is:', queueListbox);
+    console.log('Children count:', queueListbox.children.length);
+    console.log(queueListbox.innerHTML);
+
+      queueHeader.textContent = '';
+      queueHeader.classList.toggle('empty', selected.length === 0);
+      selected.forEach(opt => {
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.textContent = opt.textContent.trim();
+        queueHeader.appendChild(chip);
+      });
+    }
+    // fetch ALL users via pagination
+    async function loadAllUsers(region, token) {
+      let users = [];
+      let next = '/api/v2/users?pageSize=100';
+      while (next) {
+        const resp = await fetch(`https://api.${region}.pure.cloud${next}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!resp.ok) throw new Error(`Users API returned ${resp.status}`);
+        const body = await resp.json();
+        users = users.concat(body.entities || []);
+        next = body.nextUri;
+      }
+      return users;
+    }
+    
+    async function loadAllqueues(region, token) {
+      let queues = [];
+      let next = '/api/v2/routing/queues?pageSize=100';
+      while (next) {
+        const resp = await fetch(`https://api.${region}.pure.cloud${next}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!resp.ok) throw new Error(`Queues API returned ${resp.status}`);
+        const body = await resp.json();
+        queues = queues.concat(body.entities || []);
+        next = body.nextUri;
+      }
+      return queues;
+    }
+    async function loadAllConversations(region, token, bodyPayload) {
+  let allConvs = [];
+  let nextBody = { ...bodyPayload, paging: { pageSize: 100, pageNumber: 1 } };
+  let keepGoing = true;
+
+  while (keepGoing) {
+    const resp = await fetch(
+      `https://api.${region}.pure.cloud/api/v2/analytics/conversations/details/query`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(nextBody)
+      }
+    );
+    if (!resp.ok) throw new Error(`Conversations API returned ${resp.status}`);
+    const body = await resp.json();
+    allConvs = allConvs.concat(body.conversations || []);
+
+    if (body.nextUri) {
+      // parse the next pageNumber from nextUri
+      const url = new URL(`https://api.${region}.pure.cloud${body.nextUri}`);
+      nextBody.paging.pageNumber = parseInt(url.searchParams.get('pageNumber'), 10);
+    } else {
+      keepGoing = false;
+    }
+  }
+
+  return allConvs;
+}
     // manual auth button
     document.getElementById('btnAuth').addEventListener('click', () => {
       const clientId = document.getElementById('inputClientId').value.trim();
@@ -169,35 +351,37 @@
     window.location.reload();
   });
 
+  async function showAgents() {
+    console.log(document.getElementById('Users-Id').value);
+    console.log(document.getElementById('multi-users').value);
+  }
+
+  
     // main export logic
     async function mainTranscripts() {
       const token    = localStorage.getItem('accessToken');
-      const region   = sessionStorage.getItem('gc_region');
-      const agentIds = JSON.parse(document.getElementById('inputAgentIds').value);
-      const queueIds = JSON.parse(document.getElementById('inputQueueIds').value);
+      const region   = sessionStorage.getItem('gc_region');  
+     const rawAgents = document.getElementById('multi-users').value;    // e.g. "id1,id2,id3"
+  const rawQueues = document.getElementById('queue-users').value;    // e.g. "q1,q2"
+
+  // split into real arrays
+  const agentIds = rawAgents ? rawAgents.split(',') : [];
+  const queueIds = rawQueues ? rawQueues.split(',') : [];
       const interval = document.getElementById('inputInterval').value;
       const batchSize = parseInt(document.getElementById('inputBatchSize').value, 10) || Infinity;
       const [start, end] = interval.split('/');
 
-      log('Fetching conversations...');
-      const convResp = await fetch(
-        `https://api.${region}.pure.cloud/api/v2/analytics/conversations/details/query`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            interval: `${start}/${end}`,
-            order: 'desc',
-            orderBy: 'conversationStart',
-            paging: { pageSize: 100 },
-            segmentFilters: [
-              { type:'or', predicates: agentIds.map(id=>({type:'dimension',dimension:'userId',value:id})) },
-              { type:'or', predicates: queueIds.map(id=>({type:'dimension',dimension:'queueId',value:id})) }
-            ]
-          })
-        }
-      );
-      const { conversations = [] } = await convResp.json();
-      log(`Conversations fetched: ${conversations.length}`);
+log('Fetching all conversations (with pagination)…');
+const conversations = await loadAllConversations(region, token, {
+  interval: `${start}/${end}`,
+  order: 'desc',
+  orderBy: 'conversationStart',
+  segmentFilters: [
+    { type: 'or', predicates: agentIds.map(id => ({ type: 'dimension', dimension: 'userId', value: id })) },
+    { type: 'or', predicates: queueIds.map(id => ({ type: 'dimension', dimension: 'queueId', value: id })) }
+  ]
+});
+log(`Conversations fetched: ${conversations.length}`);
 
       let batchNumber = 0;
       for (let i = 0; i < conversations.length; i += batchSize) {
