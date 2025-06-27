@@ -41,7 +41,7 @@
     </gux-page-header>
 
   <!-- NEW: Users multi-select -->
-   <h3 > User Selection</h3>
+   <h3 style="margin: 1px 0;"> User Selection</h3>
     <div style="margin: 4px 0;">
       <div id="userHeader" class="empty"></div>
       <gux-dropdown-multi placeholder="Select one or more users" id="multi-users" filter-type="starts-with">
@@ -50,7 +50,7 @@
       </gux-dropdown-multi>
     </div>
    
- <h3 > Queue Selection</h3>
+ <h3 style="margin: 1px 0;"> Queue Selection</h3>
 
       <gux-dropdown-multi placeholder="Select one or more Queues" id="queue-users" filter-type="starts-with">
         <gux-listbox-multi aria-label="Queues" id="Queues-Id">
@@ -58,17 +58,20 @@
       </gux-dropdown-multi>
     <!-- Form fields -->
        <h3 style="margin: 1px;"> Interval Selection</h3>
-    <gux-form-field-text-like style="margin: 1px;">
+    <gux-form-field-text-like label-position="screenreader" style="margin: 1px;">
       <input type="text" slot="input" id="inputInterval" placeholder="2025-01-01T00:00:00/2025-01-02T00:00:00" />
-    
+          <label slot="label">Screenreader</label>
+
     </gux-form-field-text-like>
 
      
 
           <h3 style="margin: 1px;"> Batch Size Selection</h3>
 
-    <gux-form-field-text-like style="margin: 1px;">
+    <gux-form-field-text-like label-position="screenreader" style="margin: 1px;">
       <input type="number" slot="input" id="inputBatchSize" placeholder="10" />
+            <label slot="label">Screenreader</label>
+
     </gux-form-field-text-like>
 
     <!-- Action buttons -->
