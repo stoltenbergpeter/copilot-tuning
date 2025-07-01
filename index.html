@@ -214,7 +214,7 @@
   }
   else {
     //log('No token yet, auto‐redirecting to OAuth');
-    const authUrl = `https://login.${gc_region}.pure.cloud/oauth/authorize` +
+    const authUrl = `https://login.${gc_region}/oauth/authorize` +
                     `?response_type=token&client_id=${gc_clientId}` +
                     `&redirect_uri=${encodeURIComponent(gc_redirectUrl)}`;
     window.location.href = authUrl;
@@ -267,7 +267,7 @@
       let users = [];
       let next = '/api/v2/users?pageSize=100';
       while (next) {
-        const resp = await fetch(`https://api.${region}.pure.cloud${next}`, {
+        const resp = await fetch(`https://api.${region}${next}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!resp.ok) throw new Error(`Users API returned ${resp.status}`);
@@ -282,7 +282,7 @@
       let queues = [];
       let next = '/api/v2/routing/queues?pageSize=100';
       while (next) {
-        const resp = await fetch(`https://api.${region}.pure.cloud${next}`, {
+        const resp = await fetch(`https://api.${region}${next}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!resp.ok) throw new Error(`Queues API returned ${resp.status}`);
@@ -294,12 +294,12 @@
     }
     async function loadAllConversations(region, token, bodyPayload) {
   let allConvs = [];
-  let nextBody = { ...bodyPayload, paging: { pageSize: 100, pageNumber: 1 } };
+  let nextBody = { ...bodyPayload, paging: { pageSize: 10, pageNumber: 1 } };
   let keepGoing = true;
 
   while (keepGoing) {
     const resp = await fetch(
-      `https://api.${region}.pure.cloud/api/v2/analytics/conversations/details/query`,
+      `https://api.${region}/api/v2/analytics/conversations/details/query`,
       {
         method: 'POST',
         headers: {
@@ -315,7 +315,7 @@
 
     if (body.nextUri) {
       // parse the next pageNumber from nextUri
-      const url = new URL(`https://api.${region}.pure.cloud${body.nextUri}`);
+      const url = new URL(`https://api.${region}${body.nextUri}`);
       nextBody.paging.pageNumber = parseInt(url.searchParams.get('pageNumber'), 10);
     } else {
       keepGoing = false;
@@ -334,7 +334,7 @@
       sessionStorage.setItem('gc_region', region);
       sessionStorage.setItem('gc_redirectUrl', redirectUri);
       //log(`Redirecting to OAuth: region=${region}, clientId=${clientId}`);
-      const authUrl = `https://login.${region}.pure.cloud/oauth/authorize` +
+      const authUrl = `https://login.${region}/oauth/authorize` +
                       `?response_type=token&client_id=${clientId}` +
                       `&redirect_uri=${encodeURIComponent(redirectUri)}`;
       window.location.href = authUrl;
@@ -394,7 +394,7 @@ log(`Conversations fetched: ${conversations.length}`);
 
         // fetch suggestions in parallel
         const sugData = await Promise.all(batch.map(conv =>
-          fetch(`https://api.${region}.pure.cloud/api/v2/conversations/${conv.conversationId}/suggestions`, {
+          fetch(`https://api.${region}/api/v2/conversations/${conv.conversationId}/suggestions`, {
             headers: { 'Authorization': `Bearer ${token}` }
           })
             .then(r => r.json())
@@ -425,7 +425,7 @@ log(`Conversations fetched: ${conversations.length}`);
             }
 try {
   const urlReq = await fetch(
-    `https://api.${region}.pure.cloud/api/v2/speechandtextanalytics/conversations/${conv.conversationId}/communications/${ses.sessionId}/transcripturl`,
+    `https://api.${region}/api/v2/speechandtextanalytics/conversations/${conv.conversationId}/communications/${ses.sessionId}/transcripturl`,
     { headers: { 'Authorization': `Bearer ${token}` } }
   );
 
