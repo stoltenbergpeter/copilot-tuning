@@ -292,12 +292,20 @@
       }
       return queues;
     }
-    async function loadAllConversations(region, token, bodyPayload) {
-  let allConvs = [];
-  let nextBody = { ...bodyPayload, paging: { pageSize: 10, pageNumber: 1 } };
-  let keepGoing = true;
+async function loadAllConversations(region, token, bodyPayload) {
+  const allConvs = [];
+  const pageSize = 100;
+  let pageNumber = 1;
+  let totalPages = 1;        // we'll overwrite this after the first fetch
 
-  while (keepGoing) {
+  // keep looping until we've hit totalPages
+  while (pageNumber <= totalPages) {
+    // build the payload for this page
+    const payload = {
+      ...bodyPayload,
+      paging: { pageSize, pageNumber }
+    };
+
     const resp = await fetch(
       `https://api.${region}/api/v2/analytics/conversations/details/query`,
       {
@@ -306,24 +314,31 @@
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(nextBody)
+        body: JSON.stringify(payload)
       }
     );
-    if (!resp.ok) throw new Error(`Conversations API returned ${resp.status}`);
-    const body = await resp.json();
-    allConvs = allConvs.concat(body.conversations || []);
-
-    if (body.nextUri) {
-      // parse the next pageNumber from nextUri
-      const url = new URL(`https://api.${region}${body.nextUri}`);
-      nextBody.paging.pageNumber = parseInt(url.searchParams.get('pageNumber'), 10);
-    } else {
-      keepGoing = false;
+    if (!resp.ok) {
+      throw new Error(`Conversations API returned ${resp.status}`);
     }
+
+    const body = await resp.json();
+
+    // on first page, figure out how many pages we actually need
+    if (pageNumber === 1) {
+      const totalHits = body.totalHits || 0;
+      totalPages = Math.ceil(totalHits / pageSize);
+    }
+
+    allConvs.push(...(body.conversations || []));
+    pageNumber += 1;
   }
 
   return allConvs;
 }
+
+
+
+
     // manual auth button
     document.getElementById('btnAuth').addEventListener('click', () => {
       const clientId = document.getElementById('inputClientId').value.trim();
